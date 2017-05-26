@@ -1,7 +1,7 @@
 {
-Version   11.5
+Version   11.7
 Copyright (c) 1995-2008 by L. David Baldwin,
-Copyright (c) 2008-2014 by HtmlViewer Team
+Copyright (c) 2008-2016 by HtmlViewer Team
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
 this software and associated documentation files (the "Software"), to deal in
@@ -36,7 +36,7 @@ uses
 {$endif}
   Messages,
 {$ifdef LCL}
-  LclIntf, LclType, Types, HtmlMisc, LclProc,
+  LclIntf, LclType, Types, LclProc, HtmlMisc,
 {$endif}
 {$ifdef scrollbarInClasses}
   System.Classes,
@@ -410,7 +410,6 @@ var
   T: TAttribute;
   Multiple: boolean;
   PntPanel: TWinControl; //TPaintPanel;
-  Tmp: ThtFont;
 begin
   inherited Create(Parent,Position,L,Prop);
   CodePage := Prop.CodePage;
@@ -423,10 +422,8 @@ begin
     Parent := PntPanel;
     if Prop.HasBorderStyle then
       BorderStyle := bsNone;
-    Tmp := Prop.GetFont;
-    Font.Assign(Tmp);
+    Font.Assign(Prop.Font);
     TheFont := Font;
-    Tmp.Free;
     MultiSelect := Multiple;
     ExtendedSelect := Multiple;
     OnEnter := EnterEvent;
@@ -652,7 +649,6 @@ end;
 constructor TComboFormControlObj.Create(Parent: TCellBasic; Position: Integer; L: TAttributeList; Prop: TProperties);
 var
   PntPanel: TWinControl; //TPaintPanel;
-  Tmp: ThtFont;
   T : TAttribute;
 begin
   inherited Create(Parent,Position,L,Prop);
@@ -662,10 +658,8 @@ begin
   with FControl do
   begin
     Left := -4000; {so will be invisible until placed}
-    Tmp := Prop.GetFont;
-    Font.Assign(Tmp);
+    Font.Assign(Prop.Font);
     TheFont := Font;
-    Tmp.Free;
     Style := csDropDownList;
     OnEnter := EnterEvent;
     OnExit := ExitEvent;
@@ -837,7 +831,6 @@ var
   PntPanel: TWinControl; //TPaintPanel;
   I: integer;
   SB: ThtScrollStyle;
- Tmp: ThtFont;
 begin
   inherited Create(Parent,Position,L,Prop);
   CodePage := Prop.CodePage;
@@ -870,9 +863,7 @@ begin
     Left := -4000; {so will be invisible until placed}
     if Prop.HasBorderStyle then
       BorderStyle := bsNone;
-    Tmp := Prop.GetFont;
-    Font.Assign(Tmp);
-    Tmp.Free;
+    Font.Assign(Prop.Font);
     ScrollBars := SB;
     Wordwrap := Wrap in [wrSoft, wrHard];
     OnKeyPress := MyForm.ControlKeyPress;
@@ -1243,8 +1234,6 @@ var
   T: TAttribute;
   PntPanel: TWinControl; //TPaintPanel;
   I: Integer;
-  Tmp: ThtFont;
-
 begin
   inherited Create(Parent, Position, L, Prop);
   CodePage := Prop.CodePage;
@@ -1269,11 +1258,9 @@ begin
     if Prop.HasBorderStyle then
       BorderStyle := bsNone;
     Parent := PntPanel;
-    Tmp := Prop.GetFont;
-    Font.Assign(Tmp);
+    Font.Assign(Prop.Font);
     FHeight := Height; {Height can change when font assigned}
-    tmAveCharWidth := Tmp.tmAveCharWidth;
-    Tmp.Free;
+    tmAveCharWidth := Prop.Font.tmAveCharWidth;
     Text := Value;
 
     if FInputType= 'password'  then begin
@@ -1428,7 +1415,6 @@ end;
 constructor TButtonFormControlObj.Create(Parent: TCellBasic; Position: Integer; L: TAttributeList; Prop: TProperties);
 var
   PntPanel: TWinControl; //TPaintPanel;
-  Tmp: ThtFont;
 begin
   inherited Create(Parent, Position, L, Prop);
   if FInputType = 'submit' then
@@ -1461,9 +1447,7 @@ begin
   with FControl do
   begin
     Left := -4000; {so will be invisible until placed}
-    Tmp := Prop.GetFont;
-    Font.Assign(Tmp);
-    Tmp.Free;
+    Font.Assign(Prop.Font);
     OnClick := Self.ButtonClick;
     if Which = Browse then
       Caption := 'Browse...'

@@ -41,12 +41,8 @@ uses
 {$endif}
   Classes, SysUtils, Graphics, Controls,
 {$ifdef LCL}
-  LclIntf, LclType, Types, Messages,
-  StdCtrls, Buttons, Forms, Base64, Dialogs,
-{$ifdef MSWINDOWS}
-{$else}
-  Process,
-{$endif}
+  LclIntf, LclType, LCLVersion, Types, Messages,
+  StdCtrls, Buttons, Forms, Base64, Dialogs, Process,
   HtmlMisc,
   WideStringsLcl,
   {$ifdef DebugIt}
@@ -86,6 +82,7 @@ uses
 const
 {$ifndef LCL}
   lcl_fullversion = 0;
+  fpc_fullversion = 0;
 {$endif}
 {$ifndef MSWindows}
   //Charsets defined in unit Windows:
@@ -1187,7 +1184,31 @@ end;
 {$endif LCL}
 
 function StartProcess(const ApplicationName, Params: string; ShowWindow: Word): Boolean;
-{$ifdef MSWindows}
+{$ifdef LCL}
+var
+  Process: TProcess;
+  I: Integer;
+begin
+  // uses TProcess although Lazarus documentation prefers RunCommand
+  // as RunCommand does not start an asynchronous process.
+  Process := TProcess.Create(nil);
+  try
+    Process.Executable := ApplicationName;
+    Process.Parameters.Add(Params);
+    Process.InheritHandles := False;
+    Process.ShowWindow := swoShow;
+
+    // Copy default environment variables
+    // including DISPLAY variable for GUI application to work
+    for I := 1 to GetEnvironmentVariableCount do
+      Process.Environment.Add(GetEnvironmentString(I));
+
+    Process.Execute;
+  finally
+    Process.Free;
+  end;
+end;
+{$else}
 var
   si: TStartupInfo;
   pi: TProcessInformation;
@@ -1207,21 +1228,10 @@ begin
   Result := CreateProcess(PChar(ApplicationName), PChar(CommandLine), nil, nil, False, 0, nil, nil, si, pi);
   CloseHandle(pi.hProcess);
   CloseHandle(pi.hThread);
-{$else}
-var
-  CommandLine: String;
-  Output: String;
-begin
-  CommandLine := ApplicationName;
-  if Pos(' ', CommandLine) > 0 then
-    CommandLine := '"' + CommandLine + '"';
-  if Length(Params) > 0 then
-    CommandLine := CommandLine + ' ' + Params;
-  Result := RunCommand(CommandLine, Output);
-{$endif}
 end;
+{$endif}
 
-{----------------ThtBitmap.GetMask:}
+{ ThtBitmap }
 
 function ThtBitmap.GetMask: TBitmap;
 {This returns mask for frame 1.  Content is black, background is white}
@@ -1240,7 +1250,11 @@ begin
     if not FTransparent then
       FreeAndNil(FMask)
     else if FMask = nil then
+    begin
       FMask := ThtBitmap.Create;
+      FMask.TransparentMode := tmFixed;
+      FMask.TransparentColor := clNone;
+    end;
   end;
 end;
 
@@ -1249,8 +1263,6 @@ begin
   inherited Create;
   SetTransparentMask( WithTransparentMask );
 end;
-
-{ ThtBitmap }
 
 procedure ThtBitmap.Assign(Source: TPersistent);
 var
@@ -1265,18 +1277,7 @@ begin
   if Source is ThtBitmap then
   begin
     FTransparent := htSource.FTransparent;
-    if htSource.FMask = nil then
-      FreeAndNil(FMask)
-    else
-    begin
-      if FMask = nil then
-      begin
-        FMask := ThtBitmap.Create;
-        FMask.TransparentMode := tmFixed;
-        FMask.TransparentColor := clNone;
-      end;
-      FMask.Assign(htSource.FMask);
-    end
+    SetMask(htSource.FMask);
   end;
 end;
 
@@ -1286,11 +1287,11 @@ begin
   inherited;
 end;
 
-{----------------ThtBitmap.Draw}
-
 procedure ThtBitmap.SetMask(AValue: TBitmap);
 begin
-  if FMask <> AValue then
+  if AValue = nil then
+     FreeAndNil(FMask)
+  else
   begin
     if FMask = nil then
     begin
@@ -1303,6 +1304,33 @@ begin
 end;
 
 procedure ThtBitmap.Draw(ACanvas: TCanvas; const Rect: TRect);
+{$ifdef LCL}
+var
+  UseMaskHandle: HBitmap;
+  SrcDC: hDC;
+  DestDC: hDC;
+begin
+  if (Width=0) or (Height=0)
+  then Exit;
+
+  BitmapHandleNeeded;
+  if not BitmapHandleAllocated then Exit;
+
+  if WithTransparentMask then
+    UseMaskHandle := FMask.Handle
+  else
+    UseMaskHandle := 0;
+
+  SrcDC := Canvas.GetUpdatedHandle([csHandleValid]);
+  ACanvas.Changing;
+  DestDC := ACanvas.GetUpdatedHandle([csHandleValid]);
+  StretchMaskBlt(
+    DestDC, Rect.Left, Rect.Top, Rect.Right - Rect.Left, Rect.Bottom - Rect.Top,
+     SrcDC,         0,        0,                  Width,                 Height,
+     UseMaskHandle, 0,        0, ACanvas.CopyMode);
+  ACanvas.Changed;
+end;
+{$else LCL}
 var
   OldPalette: HPalette;
   RestorePalette: Boolean;
@@ -1334,7 +1362,6 @@ begin
     else if not Monochrome then
       SetStretchBltMode(ACanvas.Handle, STRETCH_DELETESCANS);
     try
-{$ifdef MSWindows}
       if FTransparent then
         TransparentStretchBlt(
           ACanvas.Handle, Left, Top, Right - Left, Bottom - Top,
@@ -1345,21 +1372,43 @@ begin
           ACanvas.Handle, Left, Top, Right - Left, Bottom - Top,
           Canvas.Handle, 0, 0, Width, Height,
           ACanvas.CopyMode);
-{$else}
-      StretchBlt(
-        ACanvas.Handle, Left, Top, Right - Left, Bottom - Top,
-        Canvas.Handle, 0, 0, Width, Height,
-        ACanvas.CopyMode);
-{$endif}
     finally
       if RestorePalette then
         SelectPalette(ACanvas.Handle, OldPalette, True);
     end;
   end;
 end;
+{$endif LCL}
 
 procedure ThtBitmap.StretchDraw(ACanvas: TCanvas; const DestRect, SrcRect: TRect);
 {Draw parts of this bitmap on ACanvas}
+{$ifdef LCL}
+var
+  UseMaskHandle: HBitmap;
+  SrcDC: hDC;
+  DestDC: hDC;
+begin
+  if (Width=0) or (Height=0)
+  then Exit;
+
+  BitmapHandleNeeded;
+  if not BitmapHandleAllocated then Exit;
+
+  if WithTransparentMask then
+    UseMaskHandle := FMask.Handle
+  else
+    UseMaskHandle := 0;
+
+  SrcDC := Canvas.GetUpdatedHandle([csHandleValid]);
+  ACanvas.Changing;
+  DestDC := ACanvas.GetUpdatedHandle([csHandleValid]);
+  StretchMaskBlt(
+    DestDC, DestRect.Left, DestRect.Top, DestRect.Right - DestRect.Left, DestRect.Bottom - DestRect.Top,
+     SrcDC,  SrcRect.Left,  SrcRect.Top,  SrcRect.Right -  SrcRect.Left,  SrcRect.Bottom -  SrcRect.Top,
+     UseMaskHandle, SrcRect.Left, SrcRect.Top, ACanvas.CopyMode);
+  ACanvas.Changed;
+end;
+{$else LCL}
 var
   OldPalette: HPalette;
   RestorePalette: Boolean;
@@ -1391,7 +1440,6 @@ begin
     else if not Monochrome then
       SetStretchBltMode(ACanvas.Handle, STRETCH_DELETESCANS);
     try
-{$ifdef MSWindows}
       if FTransparent then
         TransparentStretchBlt(
           ACanvas.Handle, Left, Top, Right - Left, Bottom - Top,
@@ -1402,18 +1450,13 @@ begin
           ACanvas.Handle, Left, Top, Right - Left, Bottom - Top,
           Canvas.Handle, SrcRect.Left, SrcRect.Top, SrcRect.Right - SrcRect.Left, SrcRect.Bottom - SrcRect.Top,
           ACanvas.CopyMode);
-{$else}
-      StretchBlt(
-        ACanvas.Handle, Left, Top, Right - Left, Bottom - Top,
-        Canvas.Handle, SrcRect.Left, SrcRect.Top, SrcRect.Right - SrcRect.Left, SrcRect.Bottom - SrcRect.Top,
-        ACanvas.CopyMode);
-{$endif}
     finally
       if RestorePalette then
         SelectPalette(ACanvas.Handle, OldPalette, True);
     end;
   end;
 end;
+{$endif LCL}
 
 { initialization }
 

@@ -1,7 +1,7 @@
 {
-Version   11.6
+Version   11.7
 Copyright (c) 1995-2008 by L. David Baldwin,
-Copyright (c) 2008-2015 by HtmlViewer Team
+Copyright (c) 2008-2016 by HtmlViewer Team
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
 this software and associated documentation files (the "Software"), to deal in
@@ -173,6 +173,9 @@ type
     procedure AssignCodePage(const CP: Integer);
     procedure CalcLinkFontInfo(Styles: TStyleList; I: Integer);
     procedure GetSingleFontInfo(var Font: ThtFontInfo);
+    function GetFont: ThtFont;
+    function GetEmSize: Integer;
+    function GetExSize: Integer;
   public
     PropSym: TElemSymb;
     PropTag, PropClass, PropID, PropPseudo, PropTitle: ThtString;
@@ -180,7 +183,6 @@ type
     FontBG: TColor;
     FCharSet: TFontCharSet;
     FCodePage: Integer;
-    FEmSize, FExSize: Integer; {# pixels for Em and Ex dimensions}
     Props: ThtPropertyArray;
     Originals: array[ThtPropIndices] of Boolean;
     Important: array[ThtPropIndices] of Boolean;
@@ -201,7 +203,6 @@ type
     function GetClear(var Clr: ThtClearStyle): Boolean;
     function GetDisplay: ThtDisplayStyle; //BG, 15.09.2009
     function GetFloat(var Align: ThtAlignmentStyle): Boolean;
-    function GetFont: ThtFont;
     function GetFontVariant: ThtString;
     function GetLineHeight(NewHeight: Integer): Integer;
     function GetListStyleImage: ThtString;
@@ -244,8 +245,9 @@ type
     property CharSet: TFontCharset read FCharSet write FCharSet;
     property CodePage: Integer read FCodePage write AssignCodePage;
     property DefPointSize : Double read FDefPointSize write FDefPointSize;
-    property EmSize: Integer read FEmSize;
-    property ExSize: Integer read FExSize;
+    property EmSize: Integer read GetEmSize;
+    property ExSize: Integer read GetExSize;
+    property Font: ThtFont read GetFont;
     property UseQuirksMode : Boolean read FUseQuirksMode;
   end;
 
@@ -288,12 +290,14 @@ type
   end;
 
 type
+  ThtPropertyIndexes = set of ThtPropertyIndex;
+
   ThtConvData = record
     BaseWidth, BaseHeight: Integer;
     EmSize, ExSize: Integer;
     BorderWidth: Integer;
     AutoCount: Integer;
-    IsAutoParagraph: set of ThtPropertyIndex;
+    IsAutoParagraph: ThtPropertyIndexes;
   end;
 
 const
@@ -319,7 +323,7 @@ function VMargToMarg(const Value: Variant; Relative: Boolean; Base, EmSize, ExSi
 function ConvData(BaseWidth, BaseHeight, EmSize, ExSize, BorderWidth: Integer; AutoCount: Integer = 0): ThtConvData;
 procedure ConvMargProp(I: ThtPropIndices; const VM: ThtVMarginArray; var ConvData: ThtConvData; var M: ThtMarginArray);
 
-procedure ConvInlineMargArray(const VM: ThtVMarginArray; BaseWidth, BaseHeight, EmSize, ExSize: Integer; {BStyle: ThtBorderStyle;} out M: ThtMarginArray);
+procedure ConvInlineMargArray(const VM: ThtVMarginArray; BaseWidth, BaseHeight, EmSize, ExSize, BorderWidth: Integer; {BStyle: ThtBorderStyle;} out M: ThtMarginArray);
 procedure ConvMargArray(const VM: ThtVMarginArray; BaseWidth, BaseHeight, EmSize, ExSize, BorderWidth: Integer; out AutoCount: Integer; var M: ThtMarginArray);
 procedure ConvMargArrayForCellPadding(const VM: ThtVMarginArray; EmSize, ExSize: Integer; var M: ThtMarginArray);
 procedure ConvVertMargins(const VM: ThtVMarginArray; var CD: ThtConvData; var M: ThtMarginArray);
@@ -813,8 +817,6 @@ begin
   FontBG          := ASource.FontBG        ;
   FCharSet        := ASource.FCharSet      ;
   FCodePage       := ASource.FCodePage     ;
-  FEmSize         := ASource.FEmSize       ;
-  FExSize         := ASource.FExSize       ;
   Props           := ASource.Props         ;
   Originals       := ASource.Originals     ;
   ID              := ASource.ID            ;
@@ -942,8 +944,6 @@ begin
     FIArray.Assign(Source.FIArray);
   end;
 
-  FEmSize := Source.FEmSize; {actually this is calculated later }
-  FExSize := Source.FExSize; {apparently correlates with what browsers are doing}
   {$IFDEF JPM_DEBUGGING_STYLES}
   CodeSiteLogging.CodeSite.AddSeparator;
   StyleUn.LogProperties(Self,'Self');
@@ -1286,6 +1286,18 @@ begin
     if TryStrToDisplayStyle(Props[piDisplay], Result) then
       exit;
   Result := pdUnassigned;
+end;
+
+//-- BG ---------------------------------------------------------- 21.09.2016 --
+function TProperties.GetEmSize: Integer;
+begin
+  Result := Font.EmSize;
+end;
+
+//-- BG ---------------------------------------------------------- 21.09.2016 --
+function TProperties.GetExSize: Integer;
+begin
+  Result := Font.ExSize;
 end;
 
 //-- BG ---------------------------------------------------------- 16.04.2011 --
@@ -1772,7 +1784,7 @@ begin
               else if VM[I] = 'thick' then
                 M[I] := 6
               else
-                M[I] := LengthConv(VM[I], False, BaseWidth, EmSize, ExSize, BorderWidth); {Auto will be 4}
+                M[I] := LengthConv(VM[I], False, Base(I), EmSize, ExSize, BorderWidth); {Auto will be 4}
             end
             else if (VarType(VM[I]) in varInt) then
             begin
@@ -2010,7 +2022,7 @@ end;
 {----------------ConvInlineMargArray}
 
 procedure ConvInlineMargArray(const VM: ThtVMarginArray; BaseWidth, BaseHeight, EmSize,
-  ExSize: Integer; {BStyle: ThtBorderStyle;} out M: ThtMarginArray);
+  ExSize, BorderWidth: Integer; {BStyle: ThtBorderStyle;} out M: ThtMarginArray);
  {$ifdef UseInline} inline; {$endif}
 {currently for images, form controls.  BaseWidth/Height and BStyle currently not supported}
 var
@@ -2042,6 +2054,7 @@ begin
           else
             M[I] := IntNull;
         end;
+
       piMinHeight, piMinWidth, piMaxHeight, piMaxWidth,
       MarginLeft, MarginRight, MarginTop, MarginBottom:
         begin
@@ -2057,6 +2070,7 @@ begin
           else
             M[I] := IntNull;
         end;
+
       BorderTopWidth..BorderLeftWidth:
         begin
           if VM[ThtPropIndices(Ord(BorderTopStyle) + (Ord(I) - Ord(BorderTopWidth)))] = bssNone then
@@ -2072,7 +2086,7 @@ begin
               else if VM[I] = 'thick' then
                 M[I] := 6
               else
-                M[I] := LengthConv(VM[I], False, BaseWidth, EmSize, ExSize, 4); {Auto will be 4}
+                M[I] := LengthConv(VM[I], False, BaseWidth, EmSize, ExSize, BorderWidth); {Auto will be BorderWidth}
             end
             else if (VarType(VM[I]) in varInt) then
             begin
@@ -2083,6 +2097,7 @@ begin
             end;
           end;
         end;
+
     else
       ; {remaining items unsupported/unused}
     end;
@@ -2127,13 +2142,13 @@ procedure TProperties.Combine(Styles: TStyleList; Sym: TElemSymb;
     var
       I: Integer;
       A: TAttribute;
-      T: TElemSymb;
+//      T: TElemSymb;
     begin
       if (Attributes <> nil) and (Attributes.Count > 0) then
       begin
         for I := 0 to Attributes.Count - 1 do
         begin
-          A := TAttribute(Attributes[I]);
+          A := Attributes[I];
           case A.Which of
             AlignSy:
               case Sym of
@@ -2702,11 +2717,8 @@ begin {call only if all things valid}
   begin
     GetSingleFontInfo(Font);
     TheFont := AllMyFonts.GetFontLike(Font);
-    FEmSize := TheFont.EmSize;
-    FExSize := TheFont.ExSize;
   end;
-  Result := ThtFont.Create;
-  Result.Assign(TheFont);
+  Result := TheFont;
 end;
 
 {----------------LowerCaseUnquotedStr}
@@ -2926,12 +2938,11 @@ var
   NewColor : TColor;
   LVal : THtString;
 begin
-  {$IFDEF JPM_DEBUGGING_STYLES}
+{$IFDEF JPM_DEBUGGING_STYLES}
   CodeSiteLogging.CodeSite.EnterMethod(Self,'TProperties.GetVMarginArrayDefBorder');
   LogProperties(Self,'Self');
   CodeSiteLogging.CodeSite.SendFmtMsg('ADefColor = %s',[LogPropColor( ADefColor )]);
-
-  {$ENDIF}
+{$ENDIF}
   for I := Low(MArray) to High(MArray) do
     case I of
       BorderTopStyle..BorderLeftStyle:
@@ -2940,28 +2951,30 @@ begin
         GetBorderStyle(I, BS);
         MArray[I] := BS;
       end;
+
       BorderTopColor..BorderLeftColor:
       begin
-        if TryStrToColor(Props[I],False,NewColor) then begin
+        if TryStrToColor(Props[I],False,NewColor) then
           MArray[I] := Props[I]
-        end else begin
+        else
+        begin
           LVal := Props[I];
-          if LVal = CurColor_Val then begin
+          if LVal = CurColor_Val then
             // 'currentColor'
-            MArray[I] := Props[StyleUn.Color];
-          end else begin
+            MArray[I] := Props[StyleUn.Color]
+          else
             MArray[I] := ADefColor;
-          end;
         end;
+
       end
     else
       MArray[I] := Props[I];
     end;
-  {$IFDEF JPM_DEBUGGING_STYLES}
+{$IFDEF JPM_DEBUGGING_STYLES}
   CodeSiteLogging.CodeSite.AddSeparator;
   StyleUn.LogTVMarginArray(MArray,'MArray');
   CodeSiteLogging.CodeSite.ExitMethod(Self,'TProperties.GetVMarginArrayDefBorder');
-  {$ENDIF}
+{$ENDIF}
 end;
 
 procedure TProperties.GetVMarginArray(var MArray: ThtVMarginArray);
@@ -2973,16 +2986,16 @@ element's 'color' property as the computed value for
 the border color.
 }
 begin
-  {$IFDEF JPM_DEBUGGING_STYLES}
+{$IFDEF JPM_DEBUGGING_STYLES}
   CodeSiteLogging.CodeSite.EnterMethod(Self,'TProperties.GetVMarginArray');
   LogProperties(Self,'Self');
-  {$ENDIF}
+{$ENDIF}
   GetVMarginArrayDefBorder(MArray,Props[StyleUn.Color]);
-  {$IFDEF JPM_DEBUGGING_STYLES}
+{$IFDEF JPM_DEBUGGING_STYLES}
   CodeSiteLogging.CodeSite.AddSeparator;
   StyleUn.LogTVMarginArray(MArray,'MArray');
   CodeSiteLogging.CodeSite.ExitMethod(Self,'TProperties.GetVMarginArray');
-  {$ENDIF}
+{$ENDIF}
 end;
 
 procedure TProperties.AddPropertyByIndex(Index: ThtPropIndices; PropValue: ThtString; IsImportant: Boolean);
